@@ -177,7 +177,7 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
                 return ReorderableProfilesSheet(type: type, profiles: profiles);
               return DraggableScrollableSheet(
                 expand: false,
-                initialChildSize: 0.85,
+                initialChildSize: 0.96,
                 minChildSize: 0.5,
                 maxChildSize: 0.96,
                 builder: (_, controller) => ReorderableProfilesSheet(
