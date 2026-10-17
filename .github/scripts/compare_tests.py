@@ -1,4 +1,4 @@
-import json,subprocess,sys
+import json,subprocess,sys,re
 from pathlib import Path
 root=Path.cwd()
 def run(directory,output):
@@ -8,7 +8,7 @@ def run(directory,output):
   try:x=json.loads(line)
   except ValueError:continue
   if not isinstance(x,dict):continue
-  if x.get('type')=='testStart':tests[x['test']['id']]=x['test']['name']
+  if x.get('type')=='testStart':tests[x['test']['id']]=re.sub(r'#[0-9a-f]+(?=\()', '#OBJECT', x['test']['name'])
   if x.get('type')=='testDone':
    count+=1
    if x.get('result') in ['failure','error']:fail.add(tests.get(x['testID'],str(x['testID'])))
