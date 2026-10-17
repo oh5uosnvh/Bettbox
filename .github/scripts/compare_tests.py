@@ -7,6 +7,7 @@ def run(directory,output):
  for line in Path(output).read_text().splitlines():
   try:x=json.loads(line)
   except ValueError:continue
+  if not isinstance(x,dict):continue
   if x.get('type')=='testStart':tests[x['test']['id']]=x['test']['name']
   if x.get('type')=='testDone':
    count+=1
