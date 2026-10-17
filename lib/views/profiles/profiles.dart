@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 
 import 'add_profile.dart';
+import 'profiles_title.dart';
 
 class ProfilesView extends ConsumerStatefulWidget {
   const ProfilesView({super.key});
@@ -28,8 +29,6 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
   Function? applyConfigDebounce;
   final _scrollController = ScrollController();
   Set<String>? _knownProfileIds;
-  String _filter = 'all';
-  String _sort = 'none';
   final _profileKeys = <String, GlobalKey>{};
 
   void _toBottom() {
@@ -82,120 +81,11 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
     }
   }
 
-  List<Profile> _visible(List<Profile> all) {
-    final result = all
-        .where(
-          (p) =>
-              _filter == 'all' ||
-              (_filter == 'url'
-                  ? p.type == ProfileType.url
-                  : p.type == ProfileType.file),
-        )
-        .toList();
-    if (_filter != 'all' && _sort != 'none') {
-      result.sort((a, b) {
-        final av = _filter == 'url'
-            ? a.subscriptionInfo?.expire
-            : a.lastUpdateDate?.millisecondsSinceEpoch;
-        final bv = _filter == 'url'
-            ? b.subscriptionInfo?.expire
-            : b.lastUpdateDate?.millisecondsSinceEpoch;
-        if (av == null || av <= 0) return bv == null || bv <= 0 ? 0 : 1;
-        if (bv == null || bv <= 0) return -1;
-        return _sort == 'asc' ? av.compareTo(bv) : bv.compareTo(av);
-      });
-    }
-    return result;
-  }
-
-  Widget _titleControls() {
-    final enabled = _filter != 'all';
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: _titleTap,
-          onLongPress: _toBottom,
-          child: Text(appLocalizations.profiles),
-        ),
-        if (globalState.config.profiles.length > 1) ...[
-          const SizedBox(width: 10),
-          Material(
-            color: context.colorScheme.secondaryContainer,
-            shape: const RoundedSuperellipseBorder(
-              borderRadius: BorderRadius.all(Radius.circular(20)),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                PopupMenuButton<String>(
-                  initialValue: _filter,
-                  onSelected: (value) => setState(() => _filter = value),
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'all', child: Text('默认')),
-                    PopupMenuItem(value: 'url', child: Text('订阅')),
-                    PopupMenuItem(value: 'file', child: Text('本地')),
-                  ],
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    child: Text(
-                      _filter == 'all'
-                          ? '默认'
-                          : _filter == 'url'
-                          ? '订阅'
-                          : '本地',
-                      style: context.textTheme.labelLarge,
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 1,
-                  height: 16,
-                  child: ColoredBox(
-                    color: context.colorScheme.onSecondaryContainer.withValues(
-                      alpha: 0.24,
-                    ),
-                  ),
-                ),
-                PopupMenuButton<String>(
-                  enabled: enabled,
-                  initialValue: _sort,
-                  onSelected: (value) => setState(() => _sort = value),
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'none', child: Text('默认')),
-                    PopupMenuItem(value: 'asc', child: Text('升序')),
-                    PopupMenuItem(value: 'desc', child: Text('降序')),
-                  ],
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    child: Text(
-                      enabled && _sort != 'none'
-                          ? (_sort == 'asc' ? '升序' : '降序')
-                          : '排序',
-                      style: context.textTheme.labelLarge?.copyWith(
-                        color: enabled
-                            ? context.colorScheme.onSecondaryContainer
-                            : context.colorScheme.onSecondaryContainer
-                                  .withValues(alpha: 0.38),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
+  Widget _titleControls() => ProfilesTitle(
+    title: appLocalizations.profiles,
+    onTap: _titleTap,
+    onLongPress: _toBottom,
+  );
 
   @override
   void dispose() {
@@ -341,7 +231,7 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
             _toBottom();
           _knownProfileIds = ids;
           _profileKeys.removeWhere((id, _) => !ids.contains(id));
-          final visibleProfiles = _visible(profilesSelectorState.profiles);
+          final visibleProfiles = profilesSelectorState.profiles;
           final isMobileView = ref.watch(isMobileViewProvider);
           if (visibleProfiles.isEmpty) {
             return NullStatus(label: appLocalizations.nullProfileDesc);
