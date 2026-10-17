@@ -1,0 +1,91 @@
+name: Bettbox mod build
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          cache: true
+      - run: flutter pub get
+      - run: dart run build_runner build
+      - run: dart format lib/views/profiles/profiles.dart
+      - run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - run: flutter test
+      - name: Protocol regressions
+        shell: bash
+        run: |
+          (cd core/Clash.Meta && go test ./adapter ./adapter/outbound ./transport/oppa ./transport/x365 ./transport/blackstonexhttp ./transport/anytls/... ./common/convert)
+          (cd core/sing-shadowsocks2-viewturbo && go test ./...)
+  build:
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: android
+            arch: arm64
+            os: ubuntu-latest
+          - platform: android
+            arch: arm
+            os: ubuntu-latest
+          - platform: windows
+            arch: amd64
+            os: windows-2022
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-java@v4
+        if: matrix.platform == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: nttld/setup-ndk@v1
+        if: matrix.platform == 'android'
+        id: ndk
+        with:
+          ndk-version: r28c
+      - run: flutter pub get
+      - run: dart run build_runner build
+      - name: Build Android
+        if: matrix.platform == 'android'
+        shell: bash
+        env:
+          ANDROID_NDK: ${{ steps.ndk.outputs.ndk-path }}
+        run: dart setup.dart android --arch ${{ matrix.arch }} --env stable
+      - name: Build Windows core and helper
+        if: matrix.platform == 'windows'
+        run: dart setup.dart windows --arch amd64 --out core
+      - name: Build Windows portable
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $core = Get-ChildItem libclash/windows -Recurse -Filter BettboxCore.exe | Select-Object -First 1
+          if (!$core) { throw 'BettboxCore.exe missing' }
+          $hash = (Get-FileHash $core.FullName -Algorithm SHA256).Hash.ToLower()
+          flutter build windows --release --dart-define=CORE_SHA256=$hash
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dist/Bettbox-mod-1.19.6-windows-x64.zip
+      - name: Verify private protocols in artifacts
+        run: python .github/scripts/verify_private_protocols.py dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Bettbox-mod-${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
