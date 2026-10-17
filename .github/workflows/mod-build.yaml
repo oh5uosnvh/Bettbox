@@ -19,7 +19,13 @@ jobs:
       - run: dart run build_runner build
       - run: dart format lib/views/profiles/profiles.dart
       - run: flutter analyze --no-fatal-infos --no-fatal-warnings
-      - run: flutter test
+      - name: Compare full tests with published baseline
+        run: python .github/scripts/compare_tests.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Bettbox-test-comparison
+          path: '*tests.jsonl'
       - name: Protocol regressions
         shell: bash
         run: |
