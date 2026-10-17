@@ -4,6 +4,8 @@ go 1.20
 
 replace github.com/metacubex/mihomo => ./Clash.Meta
 
+replace github.com/metacubex/sing-shadowsocks2 => ./sing-shadowsocks2-viewturbo
+
 require (
 	github.com/metacubex/mihomo v0.0.0-00010101000000-000000000000
 	golang.org/x/sync v0.11.0

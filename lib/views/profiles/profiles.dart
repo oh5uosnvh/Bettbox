@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:bett_box/common/common.dart';
@@ -25,6 +26,50 @@ class ProfilesView extends ConsumerStatefulWidget {
 
 class _ProfilesViewState extends ConsumerState<ProfilesView> {
   Function? applyConfigDebounce;
+  final _scrollController = ScrollController();
+  Set<String>? _knownProfileIds;
+  final _profileKeys = <String, GlobalKey>{};
+
+  void _toBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      unawaited(
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeOutCubic,
+        ),
+      );
+    });
+  }
+
+  void _titleTap() {
+    if (!_scrollController.hasClients) return;
+    final id = ref.read(profilesSelectorStateProvider).currentProfileId;
+    final card = _profileKeys[id]?.currentContext;
+    if (_scrollController.offset > 0.5 || card == null) {
+      unawaited(
+        _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic,
+        ),
+      );
+    } else {
+      unawaited(
+        Scrollable.ensureVisible(
+          card,
+          duration: const Duration(milliseconds: 300),
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   void _handleShowAddExtendPage() {
     showExtend(
@@ -137,7 +182,12 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
   Widget build(BuildContext context) {
     ref.watch(appSettingProvider.select((state) => state.locale));
     return CommonScaffold(
-      title: appLocalizations.profiles,
+      titleWidget: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _titleTap,
+        onLongPress: _toBottom,
+        child: Text(appLocalizations.profiles),
+      ),
       floatingActionButton: _buildFAB(),
       actions: _buildActions(),
       body: ActiveConsumer(
@@ -145,6 +195,12 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
           final profilesSelectorState = ref.watch(
             profilesSelectorStateProvider,
           );
+          final ids = profilesSelectorState.profiles.map((p) => p.id).toSet();
+          if (_knownProfileIds != null &&
+              ids.difference(_knownProfileIds!).isNotEmpty)
+            _toBottom();
+          _knownProfileIds = ids;
+          _profileKeys.removeWhere((id, _) => !ids.contains(id));
           final isMobileView = ref.watch(isMobileViewProvider);
           if (profilesSelectorState.profiles.isEmpty) {
             return NullStatus(label: appLocalizations.nullProfileDesc);
@@ -160,6 +216,7 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
               alignment: Alignment.topCenter,
               child: SingleChildScrollView(
                 key: profilesStoreKey,
+                controller: _scrollController,
                 padding: EdgeInsets.only(
                   left: 16,
                   right: 16,
@@ -186,7 +243,10 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
                     )
                       GridItem(
                         child: ProfileItem(
-                          key: Key(profilesSelectorState.profiles[i].id),
+                          key: _profileKeys.putIfAbsent(
+                            profilesSelectorState.profiles[i].id,
+                            () => GlobalKey(),
+                          ),
                           profile: profilesSelectorState.profiles[i],
                           groupValue: profilesSelectorState.currentProfileId,
                           onChanged: (profileId) {

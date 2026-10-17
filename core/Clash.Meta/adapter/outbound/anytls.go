@@ -91,6 +91,16 @@ func (t *AnyTLS) Close() error {
 	return t.client.Close()
 }
 
+func effectiveAnyTLSClientFingerprint(password, configured string) string {
+	if configured == "" && anytls.IsShanlianPassword(password) {
+		// Shanlian's deployed servers expect a Chrome-like TLS ClientHello.
+		// Keep this default scoped to the explicit #SL credential marker so
+		// ordinary AnyTLS configurations retain their upstream behavior.
+		return "chrome"
+	}
+	return configured
+}
+
 func NewAnyTLS(option AnyTLSOption) (*AnyTLS, error) {
 	addr := net.JoinHostPort(option.Server, strconv.Itoa(option.Port))
 	outbound := &AnyTLS{
@@ -129,7 +139,8 @@ func NewAnyTLS(option AnyTLSOption) (*AnyTLS, error) {
 	if err != nil {
 		return nil, err
 	}
-	restlsConfig, err := option.RestlsOpts.Parse(option.SNI, option.ClientFingerprint)
+	clientFingerprint := effectiveAnyTLSClientFingerprint(option.Password, option.ClientFingerprint)
+	restlsConfig, err := option.RestlsOpts.Parse(option.SNI, clientFingerprint)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +169,7 @@ func NewAnyTLS(option AnyTLSOption) (*AnyTLS, error) {
 		FingerPrint:       option.Fingerprint,
 		Certificate:       option.Certificate,
 		PrivateKey:        option.PrivateKey,
-		ClientFingerprint: option.ClientFingerprint,
+		ClientFingerprint: clientFingerprint,
 		ECH:               echConfig,
 		ShadowTLS:         shadowTLSConfig,
 		Restls:            restlsConfig,

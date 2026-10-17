@@ -69,6 +69,27 @@ func ParseProxy(mapping map[string]any, options ...ProxyOption) (C.Proxy, error)
 			break
 		}
 		proxy, err = outbound.NewVless(*vlessOption)
+	case "x365":
+		x365Option := &outbound.X365Option{BasicOption: basicOption}
+		err = decoder.Decode(mapping, x365Option)
+		if err != nil {
+			break
+		}
+		proxy, err = outbound.NewX365(*x365Option)
+	case "xhttp":
+		xhttpOption := &outbound.XHTTPOption{BasicOption: basicOption}
+		err = decoder.Decode(mapping, xhttpOption)
+		if err != nil {
+			break
+		}
+		proxy, err = outbound.NewXHTTP(*xhttpOption)
+	case "oppa":
+		oppaOption := &outbound.OppaOption{BasicOption: basicOption}
+		err = decoder.Decode(mapping, oppaOption)
+		if err != nil {
+			break
+		}
+		proxy, err = outbound.NewOppa(*oppaOption)
 	case "snell":
 		snellOption := &outbound.SnellOption{BasicOption: basicOption}
 		err = decoder.Decode(mapping, snellOption)
@@ -229,6 +250,26 @@ func ParseProxy(mapping map[string]any, options ...ProxyOption) (C.Proxy, error)
 
 	if err != nil {
 		return nil, err
+	}
+
+	// FastUP: the server only accepts sing-mux (h2mux) sessions on top of the
+	// derived-key trojan handshake — a bare trojan stream is rejected (502).
+	// When the mpw derivation is active, automatically wrap the proxy with
+	// SingMux (h2mux, same wire format as sing-box v1.11 / sing-mux v0.3.x)
+	// unless the user already configured smux explicitly.
+	if proxyType == "trojan" && proxy != nil {
+		if mpwValue, ok := mapping["mpw"].(string); ok && mpwValue != "" {
+			if _, muxExist := mapping["smux"].(map[string]any); !muxExist {
+				muxOption := &outbound.SingMuxOption{
+					Enabled:  true,
+					Protocol: "h2mux",
+				}
+				proxy, err = outbound.NewSingMux(*muxOption, proxy)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 
 	if muxMapping, muxExist := mapping["smux"].(map[string]any); muxExist {

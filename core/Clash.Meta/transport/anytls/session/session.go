@@ -23,6 +23,8 @@ type Session struct {
 	conn     net.Conn
 	connLock sync.Mutex
 
+	clientName string
+
 	streams    map[uint32]*Stream
 	streamId   atomic.Uint32
 	streamLock sync.RWMutex
@@ -53,9 +55,10 @@ type Session struct {
 	onNewStream func(stream *Stream)
 }
 
-func NewClientSession(conn net.Conn, _padding *atomic.Pointer[padding.PaddingFactory], clientMetadata string) *Session {
+func NewClientSession(conn net.Conn, _padding *atomic.Pointer[padding.PaddingFactory], clientMetadata string, clientName string) *Session {
 	s := &Session{
 		conn:           conn,
+		clientName:     clientName,
 		isClient:       true,
 		sendPadding:    true,
 		padding:        _padding,
@@ -83,9 +86,15 @@ func (s *Session) Run() {
 		return
 	}
 
+	// Shanlian's servers gate on an exact client identity, so the private
+	// marker overrides whatever clientMetadata the profile supplied.
+	clientIdentity := s.clientMetadata
+	if s.clientName != "" {
+		clientIdentity = s.clientName
+	}
 	settings := util.StringMap{
 		"v":           "2",
-		"client":      s.clientMetadata,
+		"client":      clientIdentity,
 		"padding-md5": s.padding.Load().Md5,
 	}
 	f := newFrame(cmdSettings, 0)

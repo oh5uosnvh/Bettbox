@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"net"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -34,21 +36,74 @@ type Client struct {
 	tlsConfig      *vmess.TLSConfig
 	dialer         N.Dialer
 	server         M.Socksaddr
+	clientName     string
 	sessionClient  *session.Client
 	padding        atomic.Pointer[padding.PaddingFactory]
 }
 
+const shanlianClientName = "sing-anytls/0.0.11"
+
+// shanlianPasswordMarker is deliberately explicit. A plain 64-hex password
+// remains a normal AnyTLS password; only a password ending in this marker uses
+// the LightXtreme/Shanlian wire-compatible password treatment.
+const shanlianPasswordMarker = "#SL"
+
+// decodeShanlianPassword converts the marked 64-hex form into the exact 32
+// bytes expected in the Shanlian AnyTLS preamble. The bytes are the account
+// UUID, ticket and counter concatenated by the provider. No hash is applied.
+func decodeShanlianPassword(password string) ([]byte, bool) {
+	if !strings.HasSuffix(password, shanlianPasswordMarker) {
+		return nil, false
+	}
+
+	hexPart := strings.TrimSuffix(password, shanlianPasswordMarker)
+	if len(hexPart) != 64 {
+		return nil, false
+	}
+
+	decoded, err := hex.DecodeString(hexPart)
+	if err != nil || len(decoded) != 32 {
+		return nil, false
+	}
+	return decoded, true
+}
+
+// IsShanlianPassword reports whether password is a valid explicitly marked
+// Shanlian credential. It is used by the adapter to apply Shanlian-specific
+// TLS defaults without changing ordinary AnyTLS nodes.
+func IsShanlianPassword(password string) bool {
+	_, ok := decodeShanlianPassword(password)
+	return ok
+}
+
 func NewClient(ctx context.Context, config ClientConfig) *Client {
-	pw := sha256.Sum256([]byte(config.Password))
+	var passwordSha256 []byte
+	decoded, shanlian := decodeShanlianPassword(config.Password)
+	if shanlian {
+		// Shanlian mode: the decoded 32 bytes are already the protocol's
+		// password field. In particular, do not SHA-256 them.
+		passwordSha256 = decoded
+	} else {
+		// Stock AnyTLS compatibility: hash the supplied password exactly as
+		// upstream does. This also makes malformed marked values harmless.
+		pw := sha256.Sum256([]byte(config.Password))
+		passwordSha256 = pw[:]
+	}
+
+	clientName := ""
+	if shanlian {
+		clientName = shanlianClientName
+	}
 	c := &Client{
-		passwordSha256: pw[:],
+		passwordSha256: passwordSha256,
 		tlsConfig:      config.TLSConfig,
 		dialer:         config.Dialer,
 		server:         config.Server,
+		clientName:     clientName,
 	}
 	// Initialize the padding state of this client
 	padding.UpdatePaddingScheme(padding.DefaultPaddingScheme, &c.padding)
-	c.sessionClient = session.NewClient(ctx, c.createOutboundTLSConnection, &c.padding, config.ClientMetadata, config.IdleSessionCheckInterval, config.IdleSessionTimeout, config.MinIdleSession, config.DisableReuse)
+	c.sessionClient = session.NewClient(ctx, c.createOutboundTLSConnection, &c.padding, config.ClientMetadata, config.IdleSessionCheckInterval, config.IdleSessionTimeout, config.MinIdleSession, config.DisableReuse, clientName)
 	return c
 }
 

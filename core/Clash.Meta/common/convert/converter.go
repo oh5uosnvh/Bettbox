@@ -618,6 +618,14 @@ func ConvertsV2Ray(buf []byte) ([]map[string]any, error) {
 			insecure, sni := query.Get("insecure"), query.Get("sni")
 			insecureBool := insecure == "1"
 			fingerprint := query.Get("hpkp")
+			// `fp` is the uTLS ClientHello fingerprint used by the
+			// share-link format. Keep it separate from `hpkp`, which is a
+			// certificate pin, so Shanlian links can request Chrome without
+			// changing the meaning of ordinary AnyTLS fields.
+			clientFingerprint := query.Get("fp")
+			if clientFingerprint == "" {
+				clientFingerprint = query.Get("client-fingerprint")
+			}
 
 			remarks := link.Fragment
 			if remarks == "" {
@@ -633,6 +641,9 @@ func ConvertsV2Ray(buf []byte) ([]map[string]any, error) {
 			anytls["password"] = password
 			anytls["sni"] = sni
 			anytls["fingerprint"] = fingerprint
+			if clientFingerprint != "" {
+				anytls["client-fingerprint"] = clientFingerprint
+			}
 			anytls["skip-cert-verify"] = insecureBool
 			anytls["udp"] = true
 

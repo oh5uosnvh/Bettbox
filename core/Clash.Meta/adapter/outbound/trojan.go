@@ -2,6 +2,8 @@ package outbound
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -65,7 +67,20 @@ type TrojanOption struct {
 	GrpcOpts          GrpcOptions      `proxy:"grpc-opts,omitempty"`
 	WSOpts            WSOptions        `proxy:"ws-opts,omitempty"`
 	SSOpts            TrojanSSOption   `proxy:"ss-opts,omitempty"`
+	Mpw               string           `proxy:"mpw,omitempty"`
 	ClientFingerprint string           `proxy:"client-fingerprint,omitempty"`
+}
+
+// FastUPKey implements the FastUP modified trojan key derivation.
+// effective = mpw == "" ? password : lowercase_hex(MD5(password || mpw))
+// The trojan layer then computes key = sha224hex(effective) as usual,
+// which is identical to the original FastUP client (verified on real servers).
+func FastUPKey(password, mpw string) string {
+	if mpw == "" {
+		return password
+	}
+	h := md5.Sum([]byte(password + mpw))
+	return hex.EncodeToString(h[:])
 }
 
 // TrojanSSOption from https://github.com/p4gefau1t/trojan-go/blob/v0.10.6/tunnel/shadowsocks/config.go#L5
@@ -283,6 +298,12 @@ func (t *Trojan) Close() error {
 func NewTrojan(option TrojanOption) (*Trojan, error) {
 	addr := net.JoinHostPort(option.Server, strconv.Itoa(option.Port))
 
+	// FastUP: default to Chrome uTLS fingerprint when the private mpw
+	// derivation is active and the user has not pinned one explicitly.
+	if option.Mpw != "" && option.ClientFingerprint == "" {
+		option.ClientFingerprint = "chrome"
+	}
+
 	if option.SNI == "" {
 		option.SNI = option.Server
 	}
@@ -301,7 +322,7 @@ func NewTrojan(option TrojanOption) (*Trojan, error) {
 			Prefer:       option.IPVersion,
 		}),
 		option:      &option,
-		hexPassword: trojan.Key(option.Password),
+		hexPassword: trojan.Key(FastUPKey(option.Password, option.Mpw)),
 	}
 	t.dialer = option.NewDialer(t.DialOptions())
 

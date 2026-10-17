@@ -55,6 +55,9 @@ const (
 	ZeroTier
 	EasyTier
 	GostRelay
+	X365
+	XHTTP
+	Oppa
 )
 
 const (
@@ -243,6 +246,12 @@ func (at AdapterType) String() string {
 		return "EasyTier"
 	case GostRelay:
 		return "GostRelay"
+	case X365:
+		return "X365"
+	case XHTTP:
+		return "XHTTP"
+	case Oppa:
+		return "Oppa"
 	case Relay:
 		return "Relay"
 	case Selector:
