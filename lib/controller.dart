@@ -721,7 +721,9 @@ class AppController {
     if (!configured) return;
     final providers = await clashCore.getExternalProviders();
     _ref.read(providersProvider.notifier).value = providers;
-    await updateGroups(preloadedProviders: providers);
+    // Core setup is the synchronous correctness boundary. Provider downloads
+    // and group hydration continue after the UI/VPN can become interactive.
+    unawaited(updateGroups(preloadedProviders: providers));
     scheduleIdleGc();
   }
 
@@ -1354,7 +1356,9 @@ class AppController {
       }
     }
 
-    await updateGroups();
+    // _initStatus/_applyProfile already schedules group hydration. Do not
+    // synchronously fetch the same remote providers a second time on launch.
+    unawaited(updateGroups());
 
     autoLaunch?.updateStatus(_ref.read(appSettingProvider).autoLaunch);
     Future.delayed(const Duration(seconds: 5), () {

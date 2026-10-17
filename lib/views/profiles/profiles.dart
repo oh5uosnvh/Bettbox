@@ -17,6 +17,7 @@ import 'package:flutter_spinkit/flutter_spinkit.dart';
 
 import 'add_profile.dart';
 import 'profiles_title.dart';
+import 'profiles_scroll.dart';
 
 class ProfilesView extends ConsumerStatefulWidget {
   const ProfilesView({super.key});
@@ -32,16 +33,8 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
   final _profileKeys = <String, GlobalKey>{};
 
   void _toBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      unawaited(
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 500),
-          curve: Curves.easeOutCubic,
-        ),
-      );
-    });
+    if (!mounted) return;
+    scrollProfilesToBottom(_scrollController);
   }
 
   void _titleTap() {
