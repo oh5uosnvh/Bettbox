@@ -37,10 +37,7 @@ class _ProxiesViewState extends ConsumerState<ProxiesView> {
     );
     final (scriptOn, compatible) = ref.watch(
       scriptStateProvider.select(
-        (s) => (
-          s.currentId != null,
-          s.currentScript?.compatible ?? false,
-        ),
+        (s) => (s.currentId != null, s.currentScript?.compatible ?? false),
       ),
     );
     final profileOverride = ref.watch(
@@ -163,9 +160,10 @@ class _ProxiesViewState extends ConsumerState<ProxiesView> {
     return Consumer(
       builder: (_, ref, _) {
         final isMobileView = ref.watch(isMobileViewProvider);
-        final currentGroupName = ref.watch(
-          proxiesTabControllerStateProvider.select((state) => state.b),
-        );
+        final tabs = ref.watch(proxiesTabControllerStateProvider);
+        final currentGroupName = tabs.a.contains(tabs.b)
+            ? tabs.b
+            : (tabs.a.isEmpty ? null : tabs.a.first);
         return Padding(
           padding: EdgeInsets.only(
             bottom: isMobileView

@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"net"
+	"sync"
 
 	"github.com/metacubex/mihomo/common/sockopt"
 	"github.com/metacubex/mihomo/component/resolver"
@@ -13,8 +14,9 @@ import (
 )
 
 var (
-	address string
-	server  = &Server{}
+	recreateMu sync.Mutex
+	address    string
+	server     = &Server{}
 
 	dnsDefaultTTL uint32 = 600
 )
@@ -62,6 +64,8 @@ func (s *Server) SetService(service resolver.Service) {
 }
 
 func ReCreateServer(addr string, lc C.InboundListenConfig, service resolver.Service) {
+	recreateMu.Lock()
+	defer recreateMu.Unlock()
 	if addr == address && service != nil {
 		server.SetService(service)
 		return
@@ -99,32 +103,42 @@ func ReCreateServer(addr string, lc C.InboundListenConfig, service resolver.Serv
 	address = addr
 	server = &Server{service: service}
 
-	go func() {
-		p, err := lc.ListenPacket(context.Background(), "udp", addr)
-		if err != nil {
-			log.Errorln("Start DNS server(UDP) error: %s", err.Error())
-			return
-		}
-
+	// Bind before publishing the replacement so Shutdown never races a pending bind.
+	current := server
+	p, udpErr := lc.ListenPacket(context.Background(), "udp", addr)
+	if udpErr != nil {
+		log.Errorln("Start DNS server(UDP) error: %s", udpErr)
+	} else {
 		if err := sockopt.UDPReuseaddr(p); err != nil {
 			log.Warnln("Failed to Reuse UDP Address: %s", err)
 		}
-
-		log.Infoln("DNS server(UDP) listening at: %s", p.LocalAddr().String())
-		server.udpServer = &D.Server{Addr: addr, PacketConn: p, Handler: server.UDPHandler()}
-		_ = server.udpServer.ActivateAndServe()
-	}()
-
-	go func() {
-		l, err := lc.Listen(context.Background(), "tcp", addr)
-		if err != nil {
-			log.Errorln("Start DNS server(TCP) error: %s", err.Error())
-			return
+		current.udpServer = &D.Server{Addr: addr, PacketConn: p, Handler: current.UDPHandler()}
+	}
+	l, tcpErr := lc.Listen(context.Background(), "tcp", addr)
+	if tcpErr != nil {
+		log.Errorln("Start DNS server(TCP) error: %s", tcpErr)
+	} else {
+		current.tcpServer = &D.Server{Addr: addr, Listener: l, Handler: current.TCPHandler()}
+	}
+	if udpErr != nil || tcpErr != nil {
+		if p != nil {
+			_ = p.Close()
 		}
-
-		log.Infoln("DNS server(TCP) listening at: %s", l.Addr().String())
-		server.tcpServer = &D.Server{Addr: addr, Listener: l, Handler: server.TCPHandler()}
-		_ = server.tcpServer.ActivateAndServe()
-	}()
-
+		if l != nil {
+			_ = l.Close()
+		}
+		current.udpServer = nil
+		current.tcpServer = nil
+		address = ""
+		return
+	}
+	udpReady, tcpReady := make(chan struct{}), make(chan struct{})
+	udpServer, tcpServer := current.udpServer, current.tcpServer
+	udpServer.NotifyStartedFunc = func() { close(udpReady) }
+	tcpServer.NotifyStartedFunc = func() { close(tcpReady) }
+	go func() { _ = udpServer.ActivateAndServe() }()
+	go func() { _ = tcpServer.ActivateAndServe() }()
+	<-udpReady
+	<-tcpReady
+	log.Infoln("DNS server listening at: %s", addr)
 }

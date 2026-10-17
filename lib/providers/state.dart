@@ -460,9 +460,8 @@ class SortedGroupProxies extends _$SortedGroupProxies {
   @override
   List<Proxy>? build(String query, String groupName) {
     final group = ref.watch(
-      filterGroupsStateProvider(
-        query,
-      ).select((state) => state.value.getGroup(groupName)),
+      filterGroupsStateProvider(query)
+          .select((state) => state.value.getGroup(groupName)),
     );
     if (group == null) return _lastSorted = const [];
     final proxies = group.all;
@@ -585,7 +584,9 @@ VM2<List<String>, String?> proxiesTabControllerState(Ref ref) {
     proxiesTabStateProvider.select(
       (state) => VM2(
         a: state.groups.map((group) => group.name).toList(),
-        b: state.currentGroupName,
+        b: state.groups.any((g) => g.name == state.currentGroupName)
+            ? state.currentGroupName
+            : state.groups.firstOrNull?.name,
       ),
     ),
   );

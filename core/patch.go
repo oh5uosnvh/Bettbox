@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -114,7 +115,7 @@ func applyPatch(raw *config.RawConfig, params *PatchParams) (string, error) {
 		}
 	}
 	patchProviderPaths(raw.ProxyProvider, params.ProvidersPath, "proxies")
-	patchProviderPaths(raw.RuleProvider, params.ProvidersPath, "rules")
+	patchSharedRulePaths(raw.RuleProvider, params.ProvidersPath)
 	hostOrder := patchHosts(raw, params.Hosts)
 	if err := patchDns(raw, params, defaults, hostOrder); err != nil {
 		return "", err
@@ -208,6 +209,38 @@ func patchTunRouteExclude(raw *config.RawConfig) {
 	}
 	tun.RouteExcludeAddressSet = append(tun.RouteExcludeAddressSet, tunRouteExcludeSet)
 	tun.RouteExcludeAddress = nil
+}
+
+func patchSharedRulePaths(providers map[string]map[string]any, base string) {
+	if base == "" {
+		return
+	}
+	for _, provider := range providers {
+		if provider["type"] != "http" {
+			continue
+		}
+		url, ok := provider["url"].(string)
+		if !ok || url == "" {
+			continue
+		}
+		identity, err := json.Marshal([]any{url, provider["header"], provider["format"], provider["behavior"]})
+		if err != nil {
+			continue
+		}
+		sum := md5.Sum(identity)
+		target := filepath.Join(filepath.Dir(base), "shared-rules", hex.EncodeToString(sum[:]))
+		// Reuse a previously downloaded profile-local file without waiting for HTTP.
+		if _, err := os.Stat(target); os.IsNotExist(err) {
+			legacySum := md5.Sum([]byte(url))
+			legacy := filepath.Join(base, "rules", hex.EncodeToString(legacySum[:]))
+			if data, err := os.ReadFile(legacy); err == nil {
+				if os.MkdirAll(filepath.Dir(target), 0700) == nil {
+					_ = os.WriteFile(target, data, 0600)
+				}
+			}
+		}
+		provider["path"] = target
+	}
 }
 
 func patchProviderPaths(providers map[string]map[string]any, base string, kind string) {

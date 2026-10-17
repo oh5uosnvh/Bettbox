@@ -28,6 +28,8 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
   Function? applyConfigDebounce;
   final _scrollController = ScrollController();
   Set<String>? _knownProfileIds;
+  String _filter = 'all';
+  String _sort = 'none';
   final _profileKeys = <String, GlobalKey>{};
 
   void _toBottom() {
@@ -47,22 +49,152 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
     if (!_scrollController.hasClients) return;
     final id = ref.read(profilesSelectorStateProvider).currentProfileId;
     final card = _profileKeys[id]?.currentContext;
-    if (_scrollController.offset > 0.5 || card == null) {
-      unawaited(
-        _scrollController.animateTo(
-          0,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOutCubic,
-        ),
-      );
+    var visible = false;
+    if (card != null) {
+      final box = card.findRenderObject();
+      if (box is RenderBox && box.hasSize) {
+        final top = box.localToGlobal(Offset.zero).dy;
+        visible =
+            top + box.size.height > kToolbarHeight &&
+            top < MediaQuery.sizeOf(context).height - 100;
+      }
+    }
+    if (visible || card == null) {
+      if (_scrollController.offset > 0.5) {
+        unawaited(
+          _scrollController.animateTo(
+            0,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+          ),
+        );
+      } else if (card == null) {
+        context.showNotifier(id == null ? '还没有选择配置' : '当前配置被筛选条件隐藏了');
+      }
     } else {
       unawaited(
         Scrollable.ensureVisible(
           card,
           duration: const Duration(milliseconds: 300),
+          alignment: 0.1,
         ),
       );
     }
+  }
+
+  List<Profile> _visible(List<Profile> all) {
+    final result = all
+        .where(
+          (p) =>
+              _filter == 'all' ||
+              (_filter == 'url'
+                  ? p.type == ProfileType.url
+                  : p.type == ProfileType.file),
+        )
+        .toList();
+    if (_filter != 'all' && _sort != 'none') {
+      result.sort((a, b) {
+        final av = _filter == 'url'
+            ? a.subscriptionInfo?.expire
+            : a.lastUpdateDate?.millisecondsSinceEpoch;
+        final bv = _filter == 'url'
+            ? b.subscriptionInfo?.expire
+            : b.lastUpdateDate?.millisecondsSinceEpoch;
+        if (av == null || av <= 0) return bv == null || bv <= 0 ? 0 : 1;
+        if (bv == null || bv <= 0) return -1;
+        return _sort == 'asc' ? av.compareTo(bv) : bv.compareTo(av);
+      });
+    }
+    return result;
+  }
+
+  Widget _titleControls() {
+    final enabled = _filter != 'all';
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _titleTap,
+          onLongPress: _toBottom,
+          child: Text(appLocalizations.profiles),
+        ),
+        if (globalState.config.profiles.length > 1) ...[
+          const SizedBox(width: 10),
+          Material(
+            color: context.colorScheme.secondaryContainer,
+            shape: const RoundedSuperellipseBorder(
+              borderRadius: BorderRadius.all(Radius.circular(20)),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                PopupMenuButton<String>(
+                  initialValue: _filter,
+                  onSelected: (value) => setState(() => _filter = value),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'all', child: Text('默认')),
+                    PopupMenuItem(value: 'url', child: Text('订阅')),
+                    PopupMenuItem(value: 'file', child: Text('本地')),
+                  ],
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    child: Text(
+                      _filter == 'all'
+                          ? '默认'
+                          : _filter == 'url'
+                          ? '订阅'
+                          : '本地',
+                      style: context.textTheme.labelLarge,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 1,
+                  height: 16,
+                  child: ColoredBox(
+                    color: context.colorScheme.onSecondaryContainer.withValues(
+                      alpha: 0.24,
+                    ),
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  enabled: enabled,
+                  initialValue: _sort,
+                  onSelected: (value) => setState(() => _sort = value),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'none', child: Text('默认')),
+                    PopupMenuItem(value: 'asc', child: Text('升序')),
+                    PopupMenuItem(value: 'desc', child: Text('降序')),
+                  ],
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    child: Text(
+                      enabled && _sort != 'none'
+                          ? (_sort == 'asc' ? '升序' : '降序')
+                          : '排序',
+                      style: context.textTheme.labelLarge?.copyWith(
+                        color: enabled
+                            ? context.colorScheme.onSecondaryContainer
+                            : context.colorScheme.onSecondaryContainer
+                                  .withValues(alpha: 0.38),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
   }
 
   @override
@@ -149,8 +281,21 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
           final profiles = globalState.config.profiles;
           showSheet(
             context: context,
+            props: const SheetProps(isScrollControlled: true),
             builder: (_, type) {
-              return ReorderableProfilesSheet(type: type, profiles: profiles);
+              if (type != SheetType.bottomSheet)
+                return ReorderableProfilesSheet(type: type, profiles: profiles);
+              return DraggableScrollableSheet(
+                expand: false,
+                initialChildSize: 0.85,
+                minChildSize: 0.5,
+                maxChildSize: 0.96,
+                builder: (_, controller) => ReorderableProfilesSheet(
+                  type: type,
+                  profiles: profiles,
+                  scrollController: controller,
+                ),
+              );
             },
           );
         },
@@ -182,12 +327,7 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
   Widget build(BuildContext context) {
     ref.watch(appSettingProvider.select((state) => state.locale));
     return CommonScaffold(
-      titleWidget: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: _titleTap,
-        onLongPress: _toBottom,
-        child: Text(appLocalizations.profiles),
-      ),
+      titleWidget: _titleControls(),
       floatingActionButton: _buildFAB(),
       actions: _buildActions(),
       body: ActiveConsumer(
@@ -201,15 +341,15 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
             _toBottom();
           _knownProfileIds = ids;
           _profileKeys.removeWhere((id, _) => !ids.contains(id));
+          final visibleProfiles = _visible(profilesSelectorState.profiles);
           final isMobileView = ref.watch(isMobileViewProvider);
-          if (profilesSelectorState.profiles.isEmpty) {
+          if (visibleProfiles.isEmpty) {
             return NullStatus(label: appLocalizations.nullProfileDesc);
           }
           final columns = system.isAndroid
               ? 1
-              : profilesSelectorState.profiles.length <
-                    profilesSelectorState.columns
-              ? profilesSelectorState.profiles.length
+              : visibleProfiles.length < profilesSelectorState.columns
+              ? visibleProfiles.length
               : profilesSelectorState.columns;
           return ScrollEdgeRise(
             builder: (context, rise) => Align(
@@ -222,9 +362,8 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
                   right: 16,
                   top: 16 + rise,
                   bottom:
-                      (profilesSelectorState.profiles.isNotEmpty &&
-                              profilesSelectorState.profiles.length % columns ==
-                                  0
+                      (visibleProfiles.isNotEmpty &&
+                              visibleProfiles.length % columns == 0
                           ? 88
                           : 16) +
                       (isMobileView
@@ -236,18 +375,14 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
                   crossAxisSpacing: 14,
                   crossAxisCount: columns,
                   children: [
-                    for (
-                      int i = 0;
-                      i < profilesSelectorState.profiles.length;
-                      i++
-                    )
+                    for (int i = 0; i < visibleProfiles.length; i++)
                       GridItem(
                         child: ProfileItem(
                           key: _profileKeys.putIfAbsent(
-                            profilesSelectorState.profiles[i].id,
+                            visibleProfiles[i].id,
                             () => GlobalKey(),
                           ),
-                          profile: profilesSelectorState.profiles[i],
+                          profile: visibleProfiles[i],
                           groupValue: profilesSelectorState.currentProfileId,
                           onChanged: (profileId) {
                             ref.read(currentProfileIdProvider.notifier).value =
@@ -686,6 +821,7 @@ class ProfileItem extends StatelessWidget {
 }
 
 class ReorderableProfilesSheet extends StatefulWidget {
+  final ScrollController? scrollController;
   final List<Profile> profiles;
   final SheetType type;
 
@@ -693,6 +829,7 @@ class ReorderableProfilesSheet extends StatefulWidget {
     super.key,
     required this.profiles,
     required this.type,
+    this.scrollController,
   });
 
   @override
@@ -748,6 +885,7 @@ class _ReorderableProfilesSheetState extends State<ReorderableProfilesSheet> {
       body: Padding(
         padding: EdgeInsets.only(bottom: 32, top: 16),
         child: ReorderableListView.builder(
+          scrollController: widget.scrollController,
           buildDefaultDragHandles: false,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           proxyDecorator: proxyDecorator,

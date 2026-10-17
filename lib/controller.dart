@@ -26,6 +26,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:yaml/yaml.dart';
 
 import 'common/archive.dart' show restoreBackupFiles;
+import 'common/flclash_backup.dart';
 import 'common/common.dart';
 import 'models/models.dart';
 import 'views/profiles/override_profile.dart';
@@ -1378,11 +1379,10 @@ class AppController {
     await _handlerDisclaimer();
     if (system.isWindows) {
       unawaited(
-        setProcessPriority(
-          _ref.read(appSettingProvider).enableHighPriority,
-        ).catchError((e) {
-          commonPrint.warn('Failed to set initial process priority: $e');
-        }),
+        setProcessPriority(_ref.read(appSettingProvider).enableHighPriority)
+            .catchError((e) {
+              commonPrint.warn('Failed to set initial process priority: $e');
+            }),
       );
     }
     _ref.read(initProvider.notifier).value = true;
@@ -1614,9 +1614,8 @@ class AppController {
         try {
           final bytes = await platformFile.readAsBytes();
           if (bytes.isEmpty) continue;
-          final profile = await Profile.normal(
-            label: platformFile.name,
-          ).saveFile(bytes);
+          final profile = await Profile.normal(label: platformFile.name)
+              .saveFile(bytes);
           await addProfile(profile);
           successCount++;
         } on Object catch (e) {
@@ -2189,6 +2188,8 @@ class AppController {
       json.decode(utf8.decode(configContent)),
     );
 
+    // Parse database metadata before modifying existing files.
+    final databaseProfiles = await readFlClashBackupProfiles(archive);
     final recoveryStrategy = _ref.read(
       appSettingProvider.select((state) => state.recoveryStrategy),
     );
@@ -2200,7 +2201,9 @@ class AppController {
 
     List<Profile> profiles = [];
 
-    if (backupConfig.profiles.isNotEmpty) {
+    if (databaseProfiles != null) {
+      profiles = databaseProfiles;
+    } else if (backupConfig.profiles.isNotEmpty) {
       profiles = backupConfig.profiles;
     } else {
       for (final profileFile in profileFiles) {
@@ -2253,6 +2256,11 @@ class AppController {
     }
 
     _recoveryLimited(limitedConfig, recoveryOption);
+    final rawBackup = json.decode(utf8.decode(configContent)) as Map;
+    final selectedId = rawBackup['currentProfileId']?.toString();
+    if (profiles.any((p) => p.id == selectedId)) {
+      _ref.read(currentProfileIdProvider.notifier).value = selectedId;
+    }
     await savePreferences();
     if (globalState.isStart) {
       await applyProfile(silence: true);
